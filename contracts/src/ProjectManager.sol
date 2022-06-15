@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity >=0.8.14;
 
-import {IProjectManager} from "./interfaces/IProjectManager.sol";
 
+import {IProjectManager} from "./interfaces/IProjectManager.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 /**
@@ -16,7 +16,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
     A project's manager, budget, deadline and goals can be updated via DAO proposal.
 
-    A project has exactly one manager. A manager may be assigned to 0, 1 or mutliple projects.
+    A project has exactly one manager. A manager may be assigned to 0, 1 or multiple projects.
 
     Modeled after KaliShareManager.sol
     https://github.com/kalidao/kali-contracts/blob/main/contracts/extensions/manager/KaliShareManager.sol
@@ -87,25 +87,30 @@ contract ProjectManager is ReentrancyGuard {
             (Project[])
         );
 
-        for (uint256 i; i < projectUpdates.length; ++i) {
-            Project memory projectUpdate = projects[i];
-            if (projectUpdate.id == 0) {
-                // id == 0 means new Project creation
-                // assign next id and auto increment id counter
-                projectUpdate.id = nextProjectId++;
-                projectUpdate.dao = msg.sender;
-                // manager address needs to be set
-                if (projectUpdate.manager == address(0)) revert ProjectManagerRequired();
-            } else {
-                Project memory savedProject = projects[projectUpdate.id];
-                // someone is trying to update a non-existent project
-                if (savedProject.id == 0) revert ProjectUnknown();
-                // someone is trying to update a project that belongs to a different DAO address
-                // only the DAO that created a project can modify it
-                if (projectUpdate.dao != msg.sender || savedProject.dao != msg.sender) revert Forbidden();
+        Project memory projectUpdate;
+        Project memory savedProject;
+        // cannot realistically overflow
+        unchecked {
+            for (uint256 i; i < projectUpdates.length; ++i) {
+                projectUpdate = projects[i];
+                if (projectUpdate.id == 0) {
+                    // id == 0 means new Project creation
+                    // assign next id and auto increment id counter
+                    projectUpdate.id = nextProjectId++;
+                    projectUpdate.dao = msg.sender;
+                    // manager address needs to be set
+                    if (projectUpdate.manager == address(0)) revert ProjectManagerRequired();
+                } else {
+                    savedProject = projects[projectUpdate.id];
+                    // someone is trying to update a non-existent project
+                    if (savedProject.id == 0) revert ProjectUnknown();
+                    // someone is trying to update a project that belongs to a different DAO address
+                    // only the DAO that created a project can modify it
+                    if (projectUpdate.dao != msg.sender || savedProject.dao != msg.sender) revert Forbidden();
+                }
+                // if all safety checks passed, create/update project
+                projects[projectUpdate.id] = projectUpdate;
             }
-            // if all safety checks passed, create/update project
-            projects[projectUpdate.id] = projectUpdate;
         }
 
         emit ExtensionSet(msg.sender, projectUpdates);
@@ -125,7 +130,7 @@ contract ProjectManager is ReentrancyGuard {
         external
         nonReentrant
     {
-        for (uint256 i; i < extensionData.length; ++i) {
+        for (uint256 i; i < extensionData.length; ) {
             (
                 uint256 projectId,
                 address toContributorAccount,
@@ -138,17 +143,20 @@ contract ProjectManager is ReentrancyGuard {
 
             if (project.manager != msg.sender) revert Forbidden();
 
-            if (project.budget < mintAmount) revert ProjectNotEnoughBudget();
+            if (mintAmount > project.budget) revert ProjectNotEnoughBudget();
 
             if (project.deadline < block.timestamp) revert ProjectExpired();
 
-            IProjectManager(dao).mintTokens(
+            IProjectManager(dao).mintShares(
                 toContributorAccount,
                 mintAmount
             );
+            // cannot realistically overflow
+            unchecked {
+                ++i;
+            }
         }
 
         emit ExtensionCalled(dao, msg.sender, extensionData);
     }
 }
-   //
